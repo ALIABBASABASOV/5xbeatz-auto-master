@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+matchering
+pedalboard
+soundfile
+pyloudnorm
+python-multipart
+jinja2
