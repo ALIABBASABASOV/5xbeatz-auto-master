@@ -6,3 +6,4 @@ soundfile
 pyloudnorm
 python-multipart
 jinja2
+numpy<2.0.0
