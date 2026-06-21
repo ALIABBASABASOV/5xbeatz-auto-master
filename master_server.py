@@ -11,7 +11,10 @@ import smtplib
 from email.message import EmailMessage
 import uuid
 
+# --- UYGULAMA BAŞLATMA ---
 app = FastAPI()
+
+# Jinja2Templates tanımı
 templates = Jinja2Templates(directory="templates")
 
 # --- MAİL AYARLARI ---
@@ -21,9 +24,8 @@ SENDER_EMAIL = "cloudmusica500@gmail.com"
 SENDER_PASSWORD = "oakl jspr ujmd usmp"
 RECEIVER_EMAIL = "tisbaga34@gmail.com"
 
-# --- 150 MB YÜKLƏMƏ LİMİTİ ---
+# --- LİMİTLER VE REFERANSLAR ---
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
-
 REFERENCE = {
     "trap": "references/ref_trap.wav",
     "drill": "references/ref_drill.wav",
@@ -42,6 +44,7 @@ REFERENCE = {
     "jazzhop": "references/ref_jazzhop.wav"
 }
 
+# Klasörleri oluşturma
 os.makedirs("temp", exist_ok=True)
 os.makedirs("mastered", exist_ok=True)
 
@@ -66,52 +69,55 @@ async def delayed_delete(file_path: str):
     if os.path.exists(file_path):
         os.remove(file_path)
 
+# --- ANASAYFA (KRİTİK DÜZELTME BURADA) ---
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+async def home(request: Request):
+    # Yeni FastAPI sürümlerinde 'request' objesi context içinde değil, 
+    # doğrudan positional argument (ilk sırada) olarak gönderilmeli.
+    return templates.TemplateResponse(
+        request=request, 
+        name="index.html", 
+        context={}
+    )
 
 @app.post("/master")
 async def master(background_tasks: BackgroundTasks, file: UploadFile = File(...), genre: str = Form("trap")):
-   
-    # ==================== 150 MB LİMİT YOXLAMASI ====================
+    # 150 MB LİMİT YOXLAMASI
     file.file.seek(0, os.SEEK_END)
     file_size = file.file.tell()
     file.file.seek(0)
-
+            
     if file_size > MAX_FILE_SIZE:
         background_tasks.add_task(send_email, "Limit Exceeded!",
                                   f"Biri 150MB limiti keçdi: {file.filename} ({round(file_size / 1024 / 1024, 1)} MB)")
-        
         return HTMLResponse(content='The file is larger than 150 MB. <a href="/">Please click here to try again.</a>', status_code=400)
-    # ===============================================================
-
-    # ==================== FORMAT YOXLAMASI ====================
+    
+    # FORMAT YOXLAMASI
     allowed_extensions = {".wav", ".mp3"}
     file_ext = os.path.splitext(file.filename)[1].lower()
-
     if file_ext not in allowed_extensions:
         return HTMLResponse(content='Unsupported file format! <a href="/">Please upload a WAV or MP3 file.</a>', status_code=400)
-    # ==========================================================
-
-    # Her işlem için benzersiz ID oluşturulur
+    
     job_id = str(uuid.uuid4())[:8]
     target_path = os.path.join("temp", f"{job_id}_{file.filename}")
-   
+    
     try:
         with open(target_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
-
+                
         ref_path = REFERENCE.get(genre.lower(), REFERENCE["trap"])
         temp_result = os.path.join("temp", f"res_{job_id}.wav")
-        
+                
+        # Matchering İşlemi
         mg.process(target=target_path, reference=ref_path, results=[mg.pcm24(temp_result)])
-
+                
+        # Pedalboard İşlemleri
         board = Pedalboard([])
         g = genre.lower()
-
         board.append(HighpassFilter(cutoff_frequency_hz=20))
         board.append(LowpassFilter(cutoff_frequency_hz=20000))
-
+                
+        # Türlere göre FX zinciri (Senin orijinal ayarların)
         if g == "trap":
             board.append(Compressor(threshold_db=-3.0, ratio=1.2, attack_ms=15, release_ms=200))
             board.append(Limiter(threshold_db=-0.5))
@@ -176,34 +182,35 @@ async def master(background_tasks: BackgroundTasks, file: UploadFile = File(...)
             board.append(Compressor(threshold_db=-3.5, ratio=1.2, attack_ms=15, release_ms=180))
             board.append(Limiter(threshold_db=-0.7))
             board.append(Gain(gain_db=2.0))
-
+        
+        # Efektleri Uygula
         audio, sr = sf.read(temp_result)
         effected = board(audio.T, sr)
         
         base_name = os.path.splitext(file.filename)[0]
         final_filename = f"{base_name}_mastered.wav"
-        # Windows ve Linux uyumu için abspath ve join kullanımı
         final_path = os.path.abspath(os.path.join("mastered", f"{job_id}_{final_filename}"))
-
+        
         sf.write(final_path, effected.T, sr, subtype='FLOAT')
-
+        
+        # Geçici dosyaları temizle
         for p in [target_path, temp_result]:
             if os.path.exists(p):
                 os.remove(p)
-
-        background_tasks.add_task(send_email, "Mastering Uğurlu!",
-                                  f"Təbriklər usta! {file.filename} parçası uğurla master olundu.")
-       
+        
+        background_tasks.add_task(send_email, "Mastering Başarılı!",
+                                  f"Tebrikler usta! {file.filename} parçası uğurla master olundu.")
         background_tasks.add_task(delayed_delete, final_path)
-
+        
         return FileResponse(final_path, media_type="audio/wav", filename=final_filename)
-
+        
     except Exception as e:
         background_tasks.add_task(send_email, "Mastering Xətası!",
                                   f"Usta, {file.filename} işlənərkən xəta baş verdi: {str(e)}")
-        return {"error": str(e)}
-   
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+# app.py'ın en altına şunu ekle
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # 0.0.0.0 adresi ve 7860 portu Hugging Face için standarttır
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 7860)))
