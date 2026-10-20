@@ -20,9 +20,9 @@ templates = Jinja2Templates(directory="templates")
 # --- MAİL AYARLARI ---
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SENDER_EMAIL = "cloudmusica500@gmail.com"
-SENDER_PASSWORD = "oakl jspr ujmd usmp"
-RECEIVER_EMAIL = "tisbaga34@gmail.com"
+SENDER_EMAIL = ""
+SENDER_PASSWORD = ""
+RECEIVER_EMAIL = ""
 
 # --- LİMİTLER VE REFERANSLAR ---
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150 MB
